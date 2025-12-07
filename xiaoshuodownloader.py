@@ -323,7 +323,7 @@ class ZLibrary_Engine(BaseEngine):
 # 5. UI 部分 (适配链接显示)
 # ==========================================
 async def search_race_mode(keyword, zlib_creds):
-    engines = [JJJXSW_Engine(), ZeroShu_Engine()]
+    engines = [JJJXSW_Engine()]    #, ZeroShu_Engine()
     if zlib_creds['email']: engines.append(ZLibrary_Engine(zlib_creds['email'], zlib_creds['password']))
 
     start = time.time()
@@ -366,7 +366,7 @@ st.markdown(
     </style>""",
     unsafe_allow_html=True)
 
-st.title("🦄 全能赛马下载 (V9.0)")
+st.title("")
 st.caption("并发检索：99小说 | 00小说 | Z-Library (提供详情页直链)")
 
 with st.sidebar:
@@ -433,5 +433,6 @@ if st.button("🚀 极速检索", type="primary"):
         with st.expander("查看执行日志"):
 
             for m in res["logs"]: st.text(m)
+
 
 
