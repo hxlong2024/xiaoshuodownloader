@@ -380,3 +380,4 @@ if st.button("🚀 极速检索", type="primary"):
         with st.expander("查看执行日志"):
 
             for m in res["logs"]: st.text(m)
+
