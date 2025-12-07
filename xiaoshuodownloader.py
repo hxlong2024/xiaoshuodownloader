@@ -358,13 +358,23 @@ async def search_race_mode(keyword, zlib_creds):
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
 st.markdown(
-    """<style>
+    """
+    <style>
+    /* 1. 核心代码：减少顶部空白 */
+    .block-container {
+        padding-top: 1rem !important;  /* 数字越小，离顶部越近，默认大概是 5rem */
+        padding-bottom: 1rem !important;
+    }
+
+    /* 2. 你原本的按钮和提示框样式 */
     .stButton>button{width:100%;border-radius:8px;font-weight:bold}
     .success-box{padding:15px;background:#e6fffa;border:1px solid #38b2ac;color:#234e52;border-radius:8px}
     .link-box{padding:15px;background:#ebf8ff;border:1px solid #4299e1;color:#2b6cb0;border-radius:8px;text-align:center;}
     .link-box a {color: #2b6cb0; font-weight: bold; font-size: 1.2em; text-decoration: none;}
-    </style>""",
+    </style>
+    """,
     unsafe_allow_html=True)
+
 
 st.title("")
 st.caption("并发检索：99小说 | 00小说 | Z-Library (提供详情页直链)")
@@ -433,6 +443,7 @@ if st.button("🚀 极速检索", type="primary"):
         with st.expander("查看执行日志"):
 
             for m in res["logs"]: st.text(m)
+
 
 
 
