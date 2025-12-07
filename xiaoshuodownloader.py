@@ -276,7 +276,16 @@ async def search_race_mode(keyword, zlib_creds):
     start = time.time()
     all_logs = []
 
-    async with aiohttp.ClientSession() as session:
+    # ================= 修改开始 =================
+    # 1. 设置超时时间为 15 秒 (防止网站慢导致报错)
+    timeout = aiohttp.ClientTimeout(total=15)
+    
+    # 2. 忽略 SSL 证书验证 (很多小说站证书是过期的，设为 False 可以强制连接)
+    connector = aiohttp.TCPConnector(ssl=False)
+
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+    # ================= 修改结束 =================
+    
         tasks = [asyncio.create_task(e.run(session, keyword)) for e in engines]
         for t, e in zip(tasks, engines): t.set_name(e.source_name)
 
@@ -291,6 +300,7 @@ async def search_race_mode(keyword, zlib_creds):
                     return {"success": True, "source": task.get_name(), "data": result, "logs": all_logs,
                             "time": time.time() - start}
     return {"success": False, "logs": all_logs, "time": time.time() - start}
+
 
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
@@ -368,4 +378,5 @@ if st.button("🚀 极速检索", type="primary"):
             st.error("😭 全网未找到资源")
 
         with st.expander("查看执行日志"):
+
             for m in res["logs"]: st.text(m)
