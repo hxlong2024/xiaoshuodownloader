@@ -7,21 +7,18 @@ import zipfile
 import io
 import time
 import urllib.parse
-import mimetypes
 
 
 # ==========================================
-# 1. 基础引擎
+# 1. 基础引擎架构 (升级版：带书名核对)
 # ==========================================
 
 class BaseEngine:
     def __init__(self):
         self.source_name = "未知源"
-        # 模拟最新 Chrome
+        self.base_url = ""
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+            "User-Agent": "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Mobile Safari/537.36"
         }
 
     def log(self, msgs, text):
@@ -31,17 +28,33 @@ class BaseEngine:
         return re.sub(r'[\\/*?:"<>|]', "", text).strip()
 
     def validate_title(self, user_keyword, site_title):
-        def clean(s): return re.sub(r'[^\w\u4e00-\u9fa5]', '', s).lower()
+        """
+        书名核对逻辑：
+        1. 去除标点符号和空格
+        2. 确保 用户输入的关键词 包含在 网站标题 中
+        """
 
-        return clean(user_keyword) in clean(site_title)
+        # 只保留汉字、字母、数字
+        def clean(s):
+            return re.sub(r'[^\w\u4e00-\u9fa5]', '', s).lower()
+
+        kw = clean(user_keyword)
+        st = clean(site_title)
+
+        # 核心逻辑：网站标题必须包含用户搜的词 (或者完全相等)
+        # 比如搜 "元尊"，结果 "元尊(精校版)" -> 通过
+        # 比如搜 "元尊"，结果 "斗破苍穹" -> 失败
+        is_match = kw in st
+        return is_match
 
     async def run(self, session, keyword):
         raise NotImplementedError
 
 
 # ==========================================
-# 2. 99小说网 (保持原样 - 提供文件下载)
+# 2. 99小说网 引擎 (带校验)
 # ==========================================
+
 class JJJXSW_Engine(BaseEngine):
     def __init__(self):
         super().__init__()
@@ -53,66 +66,95 @@ class JJJXSW_Engine(BaseEngine):
         logs = []
         try:
             self.log(logs, f"🚀 搜索: {keyword}")
-            async with session.post(f"{self.base_url}/e/search/index.php",
-                                    data={"keyboard": keyword, "Submit22": "搜索", "show": "title"},
-                                    headers=self.headers) as resp:
-                soup = BeautifulSoup(await resp.text(encoding='utf-8', errors='ignore'), 'html.parser')
+            search_url = f"{self.base_url}/e/search/index.php"
+            data = {"keyboard": keyword, "Submit22": "搜索", "show": "title"}
 
-            target_item = None;
-            target_title = "";
-            target_href = "";
+            async with session.post(search_url, data=data, headers=self.headers) as resp:
+                text = await resp.text(encoding='utf-8', errors='ignore')
+                soup = BeautifulSoup(text, 'html.parser')
+
+            result_items = soup.select(".booklist_a .list_a .main")
+
+            target_item = None
+            target_title = ""
+            target_href = ""
             target_author = "佚名"
-            for item in soup.select(".booklist_a .list_a .main"):
-                link = item.find('a')
-                if not link: continue
-                raw_title = link.get_text().strip()
+
+            # === 循环检查所有结果 ===
+            for item in result_items:
+                link_tag = item.find('a')
+                if not link_tag: continue
+
+                raw_title = link_tag.get_text().strip()
+
+                # 核对书名
                 if self.validate_title(keyword, raw_title):
-                    target_item = item;
-                    target_title = raw_title;
-                    target_href = link['href']
+                    target_item = item
+                    target_title = raw_title
+                    target_href = link_tag['href']
+
+                    # 提取作者
                     for span in item.find_all('span'):
-                        if "作者" in span.get_text(): target_author = span.get_text().split(":")[-1].strip(); break
-                    break
+                        if "作者" in span.get_text():
+                            target_author = span.get_text().replace("作者：", "").replace("作者:", "").strip()
+                            break
+                    break  # 找到匹配的就跳出
+                else:
+                    self.log(logs, f"⚠️ 跳过不匹配结果: {raw_title}")
 
-            if not target_item: return False, None, logs
-            self.log(logs, f"✅ 匹配: 《{target_title}》")
+            if not target_item:
+                self.log(logs, "❌ 未找到匹配书名的结果")
+                return False, None, logs
 
-            async with session.get(self.base_url + target_href, headers=self.headers) as resp:
+            self.log(logs, f"✅ 匹配成功: 《{target_title}》")
+
+            # Step 2: 介绍页
+            intro_url = self.base_url + target_href
+            async with session.get(intro_url, headers=self.headers) as resp:
                 intro_soup = BeautifulSoup(await resp.text(encoding='utf-8', errors='ignore'), 'html.parser')
+
             confirm_url = None
-            sso = intro_soup.select_one(".sso_d")
-            if sso:
-                for a in sso.find_all('a'):
-                    if "下载" in a.get_text(): confirm_url = a['href']; break
+            sso_area = intro_soup.select_one(".sso_d")
+            if sso_area:
+                for link in sso_area.find_all('a'):
+                    if "下载" in link.get_text() or "txt" in link.get_text().lower():
+                        confirm_url = link.get('href')
+                        break
             if not confirm_url:
                 t = intro_soup.find('a', string=re.compile("下载"))
                 if t: confirm_url = t['href']
+
             if not confirm_url: return False, None, logs
             if not confirm_url.startswith("http"): confirm_url = self.base_url + confirm_url
 
+            # Step 3: 解析真实链接
             async with session.get(confirm_url, headers=self.headers) as resp:
                 confirm_soup = BeautifulSoup(await resp.text(encoding='utf-8', errors='ignore'), 'html.parser')
-            real_link = confirm_soup.find('a', id='id0') or confirm_soup.find('a', href=re.compile(r'doaction\.php'))
-            if not real_link: return False, None, logs
-            real_url = real_link['href']
+
+            target_link = confirm_soup.find('a', id='id0') or confirm_soup.find('a', href=re.compile(r'doaction\.php'))
+            if not target_link: return False, None, logs
+
+            real_url = target_link['href']
             if not real_url.startswith("http"): real_url = self.base_url + real_url
 
-            self.log(logs, "⬇️ 下载中...")
+            # Step 4: 下载
+            self.log(logs, "⬇️ 拉取文件流...")
             async with session.get(real_url, headers=self.headers) as resp:
                 if resp.status == 200:
                     content = await resp.read()
-                    fname = f"{self.clean_filename(target_title)} by {self.clean_filename(target_author)}.txt"
-                    # 注意：这里返回 content，表示是文件流
-                    return True, {"filename": fname, "author": target_author, "content": content}, logs
+                    filename = f"{self.clean_filename(target_title)} by {self.clean_filename(target_author)}.txt"
+                    return True, {"filename": filename, "author": target_author, "content": content}, logs
+
             return False, None, logs
         except Exception as e:
-            self.log(logs, f"❌ 异常: {e}");
+            self.log(logs, f"❌ 异常: {e}")
             return False, None, logs
 
 
 # ==========================================
-# 3. 00小说网 (保持原样 - 提供文件下载)
+# 3. 00小说网 引擎 (带校验)
 # ==========================================
+
 class ZeroShu_Engine(BaseEngine):
     def __init__(self):
         super().__init__()
@@ -123,50 +165,79 @@ class ZeroShu_Engine(BaseEngine):
         logs = []
         try:
             self.log(logs, f"🚀 搜索: {keyword}")
-            async with session.post(f"{self.base_url}/s.php", data={"searchkey": keyword, "type": "articlename"},
-                                    headers=self.headers) as resp:
-                soup = BeautifulSoup(await resp.text(errors='ignore'), 'html.parser')
-            target_title = "";
-            target_href = "";
-            target_author = "佚名";
-            found = False
-            for item in soup.select(".searchresult .sone"):
-                a = item.find('a')
-                if not a: continue
-                raw_title = a.get_text().strip()
-                if self.validate_title(keyword, raw_title):
-                    target_title = raw_title;
-                    target_href = a['href']
-                    span = item.find('span', class_='author')
-                    if span: target_author = span.get_text().strip()
-                    found = True;
-                    break
+            search_url = f"{self.base_url}/s.php"
+            data = {"searchkey": keyword, "type": "articlename"}
 
-            if not found: return False, None, logs
-            self.log(logs, f"✅ 匹配: 《{target_title}》")
+            async with session.post(search_url, data=data, headers=self.headers) as resp:
+                soup = BeautifulSoup(await resp.text(errors='ignore'), 'html.parser')
+
+            results = soup.select(".searchresult .sone")
+
+            target_title = ""
+            target_href = ""
+            target_author = "佚名"
+            found_match = False
+
+            # === 循环检查所有结果 ===
+            for item in results:
+                a_tag = item.find('a')
+                if not a_tag: continue
+
+                raw_title = a_tag.get_text().strip()
+
+                # 核对书名
+                if self.validate_title(keyword, raw_title):
+                    target_title = raw_title
+                    target_href = a_tag['href']
+
+                    span_auth = item.find('span', class_='author')
+                    if span_auth:
+                        target_author = span_auth.get_text().strip()
+
+                    found_match = True
+                    break  # 找到就停
+                else:
+                    self.log(logs, f"⚠️ 跳过不匹配结果: {raw_title}")
+
+            if not found_match:
+                self.log(logs, "❌ 无匹配书名的结果")
+                return False, None, logs
+
+            self.log(logs, f"✅ 匹配成功: 《{target_title}》")
 
             detail_url = target_href if target_href.startswith("http") else self.base_url + target_href
+
+            # Step 2: 详情页
             async with session.get(detail_url, headers=self.headers) as resp:
                 detail_soup = BeautifulSoup(await resp.text(errors='ignore'), 'html.parser')
-            inter_href = None
+
             btn_list = detail_soup.find(id="btnlist")
+            intermediate_href = None
             if btn_list:
-                l = btn_list.find('a', string=re.compile("下载"))
-                if l: inter_href = l['href']
-            if not inter_href: return False, None, logs
-            inter_url = inter_href if inter_href.startswith("http") else self.base_url + inter_href
+                link_tag = btn_list.find('a', string=re.compile("下载"))
+                if link_tag: intermediate_href = link_tag['href']
 
-            async with session.get(inter_url, headers=self.headers) as resp:
+            if not intermediate_href: return False, None, logs
+            intermediate_url = intermediate_href if intermediate_href.startswith(
+                "http") else self.base_url + intermediate_href
+
+            # Step 3: 解析真实文件
+            async with session.get(intermediate_url, headers=self.headers) as resp:
                 down_soup = BeautifulSoup(await resp.text(errors='ignore'), 'html.parser')
-            file_link = down_soup.find('a', href=re.compile(r'\.(txt|zip|rar)$', re.IGNORECASE))
-            if not file_link: file_link = down_soup.find('a', string=re.compile("下载"),
-                                                         href=lambda h: h and ('txt' in h or 'down' in h))
-            if not file_link: return False, None, logs
-            real_url = file_link['href']
-            if not real_url.startswith("http"): real_url = urllib.parse.urljoin(inter_url, real_url)
 
-            self.log(logs, "⬇️ 下载中...")
-            async with session.get(real_url, headers=self.headers) as resp:
+            file_link = down_soup.find('a', href=re.compile(r'\.(txt|zip|rar)$', re.IGNORECASE))
+            if not file_link:
+                file_link = down_soup.find('a', string=re.compile("下载"),
+                                           href=lambda h: h and ('txt' in h or 'down' in h))
+
+            if not file_link: return False, None, logs
+            real_file_url = file_link['href']
+            if not real_file_url.startswith("http"): real_file_url = urllib.parse.urljoin(intermediate_url,
+                                                                                          real_file_url)
+
+            # Step 4: 下载
+            self.log(logs, "⬇️ 拉取文件流...")
+            async with session.get(real_file_url, headers=self.headers) as resp:
                 if resp.status == 200:
                     content = await resp.read()
                     ext = ".txt"
@@ -174,111 +245,32 @@ class ZeroShu_Engine(BaseEngine):
                         ext = ".zip"
                     elif content[:2] == b'Rar':
                         ext = ".rar"
-                    fname = f"{self.clean_filename(target_title)} by {self.clean_filename(target_author)}{ext}"
-                    # 注意：这里返回 content
-                    return True, {"filename": fname, "author": target_author, "content": content}, logs
+
+                    filename = f"{self.clean_filename(target_title)} by {self.clean_filename(target_author)}{ext}"
+                    return True, {"filename": filename, "author": target_author, "content": content}, logs
+
             return False, None, logs
         except Exception as e:
-            self.log(logs, f"❌ 异常: {e}");
-            return False, None, logs
-
-
-# ==========================================
-# 4. Z-Library 引擎 (V9.0 直达详情页版)
-# ==========================================
-
-class ZLibrary_Engine(BaseEngine):
-    def __init__(self, email, password):
-        super().__init__()
-        self.source_name = "Z-Library"
-        self.base_url = "https://en.zlib.li"
-        self.email = email
-        self.password = password
-
-    async def login(self, session, logs):
-        if not self.email: return False
-        self.log(logs, "🔑 正在登录...")
-        try:
-            h = self.headers.copy();
-            h["Origin"] = self.base_url;
-            h["Referer"] = f"{self.base_url}/login"
-            payload = {"email": self.email, "password": self.password, "site_mode": "books", "action": "login",
-                       "redirectUrl": self.base_url + "/"}
-            async with session.post(f"{self.base_url}/", data=payload, headers=h) as resp:
-                text = await resp.text()
-                if 'id="loginForm"' in text or "validation-error" in text:
-                    self.log(logs, "❌ 登录失败")
-                    return False
-                self.log(logs, "🔓 登录成功")
-                return True
-        except Exception as e:
-            self.log(logs, f"❌ 登录异常: {e}");
-            return False
-
-    async def run(self, session, keyword):
-        logs = []
-        if not await self.login(session, logs): return False, None, logs
-
-        try:
-            # 1. 搜索
-            self.log(logs, f"🚀 搜索: {keyword}")
-            async with session.get(f"{self.base_url}/s/", params={"q": keyword}, headers=self.headers) as resp:
-                soup = BeautifulSoup(await resp.text(errors='ignore'), 'html.parser')
-
-            target_item = None
-            target_data = {}
-
-            # 解析搜索结果
-            for item in soup.find_all('z-bookcard'):
-                t_div = item.find('div', slot='title')
-                title = t_div.get_text().strip() if t_div else ""
-                href = item.get('href')
-
-                if self.validate_title(keyword, title) and href:
-                    target_item = item
-                    target_data = {"title": title, "href": href.strip()}
-                    a_div = item.find('div', slot='author')
-                    target_data['author'] = a_div.get_text().strip() if a_div else "佚名"
-                    break
-
-            if not target_item:
-                self.log(logs, "❌ 未找到匹配书籍")
-                return False, None, logs
-
-            # 2. 获取详情页链接并返回
-            # 强制拼接完整 URL，确保是 https://...
-            detail_url = urllib.parse.urljoin(self.base_url, target_data['href'])
-
-            self.log(logs, f"✅ 锁定: 《{target_data['title']}》")
-            self.log(logs, f"🔗 生成详情页链接: {detail_url}")
-
-            # === 修改处：不再下载，直接返回 URL ===
-            # 我们返回一个特殊的字典，没有 'content' 字段，但有 'url'
-            return True, {
-                "type": "link",  # 标记这是个链接
-                "title": target_data['title'],
-                "author": target_data['author'],
-                "url": detail_url
-            }, logs
-
-        except Exception as e:
-            self.log(logs, f"❌ 异常: {e}");
+            self.log(logs, f"❌ 异常: {e}")
             return False, None, logs
 
 
 # ==========================================
-# 5. UI 部分 (适配链接显示)
+# 4. 赛马调度 (逻辑不变)
 # ==========================================
-async def search_race_mode(keyword, zlib_creds):
-    engines = [JJJXSW_Engine(), ZeroShu_Engine()]
-    if zlib_creds['email']: engines.append(ZLibrary_Engine(zlib_creds['email'], zlib_creds['password']))
 
-    start = time.time()
+async def search_race_mode(keyword):
+    engine_classes = [JJJXSW_Engine, ZeroShu_Engine]
+    start_time = time.time()
     all_logs = []
 
     async with aiohttp.ClientSession() as session:
-        tasks = [asyncio.create_task(e.run(session, keyword)) for e in engines]
-        for t, e in zip(tasks, engines): t.set_name(e.source_name)
+        tasks = []
+        for EngineCls in engine_classes:
+            engine = EngineCls()
+            task = asyncio.create_task(engine.run(session, keyword))
+            task.set_name(engine.source_name)
+            tasks.append(task)
 
         pending = set(tasks)
         while pending:
@@ -287,85 +279,58 @@ async def search_race_mode(keyword, zlib_creds):
                 success, result, logs = await task
                 all_logs.extend(logs)
                 if success and result:
-                    for p in pending: p.cancel()
-                    return {"success": True, "source": task.get_name(), "data": result, "logs": all_logs,
-                            "time": time.time() - start}
-    return {"success": False, "logs": all_logs, "time": time.time() - start}
+                    winner_source = task.get_name()
+                    for p_task in pending: p_task.cancel()  # 熔断其他
+                    return {"success": True, "source": winner_source, "data": result, "logs": all_logs,
+                            "time": time.time() - start_time}
+
+    return {"success": False, "logs": all_logs, "time": time.time() - start_time}
 
 
-st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
+# ==========================================
+# 5. Streamlit 界面
+# ==========================================
+st.set_page_config(page_title="严谨版赛马下载器", page_icon="🐴", layout="centered")
 st.markdown(
-    """<style>
-    .stButton>button{width:100%;border-radius:8px;font-weight:bold}
-    .success-box{padding:15px;background:#e6fffa;border:1px solid #38b2ac;color:#234e52;border-radius:8px}
-    .link-box{padding:15px;background:#ebf8ff;border:1px solid #4299e1;color:#2b6cb0;border-radius:8px;text-align:center;}
-    .link-box a {color: #2b6cb0; font-weight: bold; font-size: 1.2em; text-decoration: none;}
-    </style>""",
+    """<style>.stButton>button { width: 100%; border-radius: 8px; font-weight: bold; } .success-box { padding: 15px; background: #e6fffa; border: 1px solid #38b2ac; color: #234e52; border-radius: 8px; margin-bottom: 15px;}</style>""",
     unsafe_allow_html=True)
 
-st.title("🦄 全能赛马下载 (V9.0)")
-st.caption("并发检索：99小说 | 00小说 | Z-Library (提供详情页直链)")
+st.title("🐴 极速且严谨的小说下载")
+st.caption("并发赛马 + 智能书名校验 | 杜绝假资源")
 
-with st.sidebar:
-    st.header("🔑 Z-Library")
-    z_email = st.text_input("Email");
-    z_pass = st.text_input("Password", type="password")
+keyword = st.text_input("输入书名", placeholder="例如：元尊")
 
-keyword = st.text_input("书名", placeholder="例如：可怜的社畜")
-if st.button("🚀 极速检索", type="primary"):
+if st.button("🚀 极速搜索", type="primary"):
     if not keyword:
-        st.warning("请输入书名")
+        st.warning("请输入书名！")
     else:
-        st.info("🔎 全网并发检索中...")
-        res = asyncio.run(search_race_mode(keyword, {'email': z_email, 'password': z_pass}))
+        status_text = st.empty()
+        status_text.info("🔎 正在并发检索并核对书名...")
 
-        if res["success"]:
-            d = res['data']
+        result = asyncio.run(search_race_mode(keyword))
+        status_text.empty()
 
-            # === 分支判断：是直接下载的文件，还是 ZLib 的链接？ ===
+        if result["success"]:
+            data = result['data']
+            st.markdown(f"""
+            <div class="success-box">
+                <h3>✅ 校验通过！</h3>
+                <b>书名：</b>{data['filename']}<br>
+                <b>来源：</b>{result['source']} (耗时 {result['time']:.2f}s)
+            </div>
+            """, unsafe_allow_html=True)
 
-            # 情况 A: 这是一个链接 (Z-Library)
-            if d.get("type") == "link":
-                st.markdown(
-                    f"""
-                    <div class='link-box'>
-                        <h3>🕵️‍♂️ 已找到书籍详情页</h3>
-                        <p><b>{d['title']}</b><br>作者: {d['author']}</p>
-                        <hr style="margin:10px 0; border:0; border-top:1px solid #bbeeef;">
-                        <p>由于来源限制，请点击下方链接去浏览器手动下载：</p>
-                        <a href="{d['url']}" target="_blank">👉 点击打开: {d['title']} 👈</a>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-                # 额外提供一个复制框，方便复制
-                st.text_input("或复制此链接:", d['url'])
-                st.caption(f"来源: {res['source']} (耗时 {res['time']:.2f}s)")
-
-            # 情况 B: 这是一个文件 (其他小说网)
-            elif "content" in d:
-                st.markdown(
-                    f"<div class='success-box'><h3>✅ 文件获取成功!</h3><b>{d['filename']}</b><br>源: {res['source']} ({res['time']:.2f}s)</div>",
-                    unsafe_allow_html=True)
-
-                mime = "application/octet-stream"
-                if d['filename'].endswith(".pdf"):
-                    mime = "application/pdf"
-                elif d['filename'].endswith(".epub"):
-                    mime = "application/epub+zip"
-                elif d['filename'].endswith(".txt"):
-                    mime = "text/plain"
-
-                c1, c2 = st.columns(2)
-                c1.download_button(f"📥 下载 ({d['filename'].split('.')[-1]})", d['content'], d['filename'], mime=mime)
-
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED, False) as zf:
-                    zf.writestr(d['filename'], d['content'])
-                c2.download_button("📦 下载ZIP", buf.getvalue(), d['filename'] + ".zip", "application/zip")
-
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button("📥 下载文件", data['content'], file_name=data['filename'])
+            with col2:
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zf:
+                    zf.writestr(data['filename'], data['content'])
+                st.download_button("📦 下载 ZIP", zip_buffer.getvalue(), file_name=data['filename'] + ".zip",
+                                   mime="application/zip")
         else:
-            st.error("😭 全网未找到资源")
+            st.error("😭 未找到匹配该书名的资源 (已自动过滤不相关结果)")
 
-        with st.expander("查看执行日志"):
-            for m in res["logs"]: st.text(m)
+        with st.expander("📊 查看校验日志"):
+            for msg in result["logs"]: st.text(msg)
