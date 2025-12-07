@@ -362,7 +362,7 @@ st.markdown(
     <style>
     /* 1. 核心代码：减少顶部空白 */
     .block-container {
-        padding-top: 1rem !important;  /* 数字越小，离顶部越近，默认大概是 5rem */
+        padding-top: 0rem !important;  /* 数字越小，离顶部越近，默认大概是 5rem */
         padding-bottom: 1rem !important;
     }
 
@@ -443,6 +443,7 @@ if st.button("🚀 极速检索", type="primary"):
         with st.expander("查看执行日志"):
 
             for m in res["logs"]: st.text(m)
+
 
 
 
