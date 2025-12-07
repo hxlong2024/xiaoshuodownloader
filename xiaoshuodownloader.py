@@ -111,75 +111,128 @@ class JJJXSW_Engine(BaseEngine):
 
 
 # ==========================================
-# 3. 00小说网 (保持原样 - 提供文件下载)
+# 3. 00小说网 (终极修复：先访问主页拿Cookie)
 # ==========================================
 class ZeroShu_Engine(BaseEngine):
     def __init__(self):
         super().__init__()
         self.source_name = "00小说网"
-        self.base_url = "https://m.00shu.la"
+        # 强制使用 http，避开 https 证书问题
+        self.base_url = "http://m.00shu.la" 
+        
+        # 模拟普通电脑浏览器的头
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "http://m.00shu.la/",
+            "Origin": "http://m.00shu.la",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
 
     async def run(self, session, keyword):
         logs = []
         try:
+            # === 第一步：先访问首页，为了获取 Cookie ===
+            # 很多网站防爬虫策略是：没有首页的 Cookie，就不允许搜索
+            try:
+                await session.get(self.base_url, headers=self.headers)
+            except:
+                pass # 就算首页慢，也尝试继续，万一不需要呢
+
+            # === 第二步：带着 Cookie 去搜索 ===
             self.log(logs, f"🚀 搜索: {keyword}")
-            async with session.post(f"{self.base_url}/s.php", data={"searchkey": keyword, "type": "articlename"},
+            async with session.post(f"{self.base_url}/s.php", 
+                                    data={"searchkey": keyword, "type": "articlename"},
                                     headers=self.headers) as resp:
-                soup = BeautifulSoup(await resp.text(errors='ignore'), 'html.parser')
-            target_title = "";
-            target_href = "";
-            target_author = "佚名";
-            found = False
-            for item in soup.select(".searchresult .sone"):
+                # 00小说网有时返回的是乱码，尝试用 gbk 或 utf-8 解码
+                content = await resp.read()
+                # 尝试自动检测编码，通常是 utf-8
+                html = content.decode('utf-8', errors='ignore')
+                soup = BeautifulSoup(html, 'html.parser')
+            
+            target_title = ""; target_href = ""; target_author = "佚名"; found = False
+            
+            # 打印一下找到多少个结果，方便调试
+            items = soup.select(".searchresult .sone")
+            
+            for item in items:
                 a = item.find('a')
                 if not a: continue
                 raw_title = a.get_text().strip()
+                
+                # 验证标题
                 if self.validate_title(keyword, raw_title):
-                    target_title = raw_title;
+                    target_title = raw_title
                     target_href = a['href']
                     span = item.find('span', class_='author')
                     if span: target_author = span.get_text().strip()
-                    found = True;
+                    found = True
                     break
 
-            if not found: return False, None, logs
+            if not found: 
+                # 如果没找到，有时候是因为网站把你重定向到了详情页（如果是唯一结果）
+                # 检查是不是直接跳到了书名页
+                meta_title = soup.select_one("meta[property='og:title']")
+                if meta_title and self.validate_title(keyword, meta_title['content']):
+                     # 这里处理一下唯一结果直接跳转的情况（预留逻辑，通常00shu不会）
+                     pass
+                
+                self.log(logs, "❌ 未找到 (或被反爬拦截)")
+                return False, None, logs
+                
             self.log(logs, f"✅ 匹配: 《{target_title}》")
 
-            detail_url = target_href if target_href.startswith("http") else self.base_url + target_href
+            # === 第三步：处理详情页链接 ===
+            # 补全链接
+            if target_href.startswith("/"):
+                detail_url = self.base_url + target_href
+            elif not target_href.startswith("http"):
+                detail_url = f"{self.base_url}/{target_href}"
+            else:
+                detail_url = target_href
+            
+            # 强制 http
+            detail_url = detail_url.replace("https://", "http://")
+            
             async with session.get(detail_url, headers=self.headers) as resp:
                 detail_soup = BeautifulSoup(await resp.text(errors='ignore'), 'html.parser')
+            
+            # === 第四步：找下载也 ===
             inter_href = None
             btn_list = detail_soup.find(id="btnlist")
             if btn_list:
                 l = btn_list.find('a', string=re.compile("下载"))
                 if l: inter_href = l['href']
+            
             if not inter_href: return False, None, logs
-            inter_url = inter_href if inter_href.startswith("http") else self.base_url + inter_href
+            
+            # 补全下载页链接
+            inter_url = urllib.parse.urljoin(detail_url, inter_href)
+            inter_url = inter_url.replace("https://", "http://")
 
             async with session.get(inter_url, headers=self.headers) as resp:
                 down_soup = BeautifulSoup(await resp.text(errors='ignore'), 'html.parser')
+            
+            # === 第五步：找文件链接 ===
             file_link = down_soup.find('a', href=re.compile(r'\.(txt|zip|rar)$', re.IGNORECASE))
-            if not file_link: file_link = down_soup.find('a', string=re.compile("下载"),
-                                                         href=lambda h: h and ('txt' in h or 'down' in h))
+            if not file_link: file_link = down_soup.find('a', string=re.compile("下载"), href=lambda h: h and ('txt' in h or 'down' in h))
+            
             if not file_link: return False, None, logs
             real_url = file_link['href']
-            if not real_url.startswith("http"): real_url = urllib.parse.urljoin(inter_url, real_url)
+            real_url = urllib.parse.urljoin(inter_url, real_url)
+            real_url = real_url.replace("https://", "http://")
 
             self.log(logs, "⬇️ 下载中...")
             async with session.get(real_url, headers=self.headers) as resp:
                 if resp.status == 200:
                     content = await resp.read()
                     ext = ".txt"
-                    if content[:2] == b'PK':
-                        ext = ".zip"
-                    elif content[:2] == b'Rar':
-                        ext = ".rar"
+                    if content[:2] == b'PK': ext = ".zip"
+                    elif content[:2] == b'Rar': ext = ".rar"
                     fname = f"{self.clean_filename(target_title)} by {self.clean_filename(target_author)}{ext}"
-                    # 注意：这里返回 content
                     return True, {"filename": fname, "author": target_author, "content": content}, logs
             return False, None, logs
         except Exception as e:
-            self.log(logs, f"❌ 异常: {e}");
+            self.log(logs, f"❌ 异常: {e}")
             return False, None, logs
 
 
@@ -380,4 +433,5 @@ if st.button("🚀 极速检索", type="primary"):
         with st.expander("查看执行日志"):
 
             for m in res["logs"]: st.text(m)
+
 
