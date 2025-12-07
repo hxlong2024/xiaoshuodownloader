@@ -165,7 +165,7 @@ class ZeroShu_Engine(BaseEngine):
         logs = []
         try:
             self.log(logs, f"🚀 搜索: {keyword}")
-            search_url = f"{self.base_url}/s.php"
+            search_url = f"{self.base_url}"
             data = {"searchkey": keyword, "type": "articlename"}
 
             async with session.post(search_url, data=data, headers=self.headers) as resp:
@@ -333,4 +333,5 @@ if st.button("🚀 极速搜索", type="primary"):
             st.error("😭 未找到匹配该书名的资源 (已自动过滤不相关结果)")
 
         with st.expander("📊 查看校验日志"):
+
             for msg in result["logs"]: st.text(msg)
