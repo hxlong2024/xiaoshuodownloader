@@ -405,7 +405,7 @@ if st.button("🚀 极速检索", type="primary"):
                         <h3>🕵️‍♂️ 已找到书籍详情页</h3>
                         <p><b>{d['title']}</b><br>作者: {d['author']}</p>
                         <hr style="margin:10px 0; border:0; border-top:1px solid #bbeeef;">
-                        <p>由于来源限制，请点击下方链接去浏览器手动下载：</p>
+                        <p>请点击下方链接去浏览器手动下载：</p>
                         <a href="{d['url']}" target="_blank">👉 点击打开: {d['title']} 👈</a>
                     </div>
                     """,
@@ -443,6 +443,7 @@ if st.button("🚀 极速检索", type="primary"):
         with st.expander("查看执行日志"):
 
             for m in res["logs"]: st.text(m)
+
 
 
 
