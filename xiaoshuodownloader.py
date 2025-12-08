@@ -111,7 +111,27 @@ class JJJXSW_Engine(BaseEngine):
 
 
 # ==========================================
-# 3. Z-Library 引擎
+# 3. 00小说网 (保留类定义，暂时不用)
+# ==========================================
+class ZeroShu_Engine(BaseEngine):
+    def __init__(self):
+        super().__init__()
+        self.source_name = "00小说网"
+        self.base_url = "http://m.00shu.la" 
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "http://m.00shu.la/",
+            "Origin": "http://m.00shu.la",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+    async def run(self, session, keyword):
+        # 暂时省略具体逻辑，如果需要重新启用，请把之前修复版的代码填回来
+        # 或者直接留空返回，防止报错
+        return False, None, []
+
+
+# ==========================================
+# 4. Z-Library 引擎 (只提供链接)
 # ==========================================
 class ZLibrary_Engine(BaseEngine):
     def __init__(self, email, password):
@@ -186,13 +206,13 @@ class ZLibrary_Engine(BaseEngine):
 
 
 # ==========================================
-# 4. 搜索调度逻辑
+# 5. 搜索调度逻辑
 # ==========================================
 async def search_race_mode(keyword, zlib_creds):
-    # ✅ 修改：移除了 BiQuGe，只保留 99小说网
+    # ✅ 这里只保留了 99小说网 和 Z-Library
     engines = [JJJXSW_Engine()] 
     
-    # 00小说网依然保留注释状态，想用可以随时加回来
+    # 如果想恢复 00小说网，把下面这行前面的 # 号去掉
     # engines.append(ZeroShu_Engine()) 
 
     if zlib_creds['email']: engines.append(ZLibrary_Engine(zlib_creds['email'], zlib_creds['password']))
@@ -221,7 +241,7 @@ async def search_race_mode(keyword, zlib_creds):
 
 
 # ==========================================
-# 5. UI 部分
+# 6. UI 部分 (核心修复版)
 # ==========================================
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
@@ -232,10 +252,12 @@ cookie_manager = stx.CookieManager()
 st.markdown(
     """
     <style>
+    /* 1. 顶部空白去除 */
     .block-container {
         padding-top: 0rem !important;
         padding-bottom: 1rem !important;
     }
+    /* 2. 按钮和容器样式 */
     .stButton>button{width:100%;border-radius:8px;font-weight:bold}
     .success-box{padding:15px;background:#e6fffa;border:1px solid #38b2ac;color:#234e52;border-radius:8px}
     .link-box{padding:15px;background:#ebf8ff;border:1px solid #4299e1;color:#2b6cb0;border-radius:8px;text-align:center;}
@@ -248,33 +270,54 @@ st.markdown(
 st.title("")
 st.caption("并发检索：99小说 | Z-Library")
 
-# === 侧边栏：Cookie 账号管理 ===
+# === 侧边栏：Cookie 账号管理 (霸道填充逻辑) ===
 with st.sidebar:
     st.header("🔑 Z-Library")
     
     # 1. 读取 Cookie
     cookies = cookie_manager.get_all()
-    cookie_email = cookies.get("zlib_email", "") 
-    cookie_pass = cookies.get("zlib_pass", "")
+    
+    # 2. 【核心修复】霸道填充逻辑
+    # 如果 Cookie 存在，但 Session State 里没东西（或者为空），强制填进去
+    # 这步操作是为了对抗 Streamlit 的刷新机制
+    if cookies:
+        c_email = cookies.get("zlib_email")
+        c_pass = cookies.get("zlib_pass")
+        
+        if c_email and (st.session_state.get("z_email_input") == "" or "z_email_input" not in st.session_state):
+            st.session_state["z_email_input"] = c_email
+            
+        if c_pass and (st.session_state.get("z_pass_input") == "" or "z_pass_input" not in st.session_state):
+            st.session_state["z_pass_input"] = c_pass
 
-    # 2. 显示输入框
-    input_email = st.text_input("Email", value=cookie_email, key="z_email_input")
-    input_pass = st.text_input("Password", value=cookie_pass, type="password", key="z_pass_input")
+    # 3. 显示输入框
+    # 注意：不要写 value=...，完全交给 key 和 session_state 管理
+    input_email = st.text_input("Email", key="z_email_input")
+    input_pass = st.text_input("Password", type="password", key="z_pass_input")
 
-    # 3. 保存按钮 (修复了 DuplicateElementKey 报错)
+    # 4. 保存按钮
     if st.button("💾 记住我的账号"):
         expires = datetime.datetime.now() + datetime.timedelta(days=30)
-        # 注意：这里增加了 key 参数，防止冲突
+        
+        # 写入 Cookie (使用 unique key 防止报错)
         cookie_manager.set("zlib_email", input_email, expires_at=expires, key="set_email_cookie")
         cookie_manager.set("zlib_pass", input_pass, expires_at=expires, key="set_pass_cookie")
-        st.success("已保存到设备！")
-        time.sleep(1)
+        
+        st.success("✅ 已保存！")
+        # 强制等待 1.5 秒，让手机浏览器有时间写入
+        time.sleep(1.5) 
         st.rerun()
 
-    # 4. 清除按钮
+    # 5. 清除按钮
     if st.button("🗑️ 忘记账号"):
+        # 删除 Cookie (使用 unique key 防止报错)
         cookie_manager.delete("zlib_email", key="del_email_cookie")
         cookie_manager.delete("zlib_pass", key="del_pass_cookie")
+        
+        # 同时必须清空当前的输入框状态，否则界面上删不掉
+        st.session_state["z_email_input"] = ""
+        st.session_state["z_pass_input"] = ""
+        
         st.rerun()
 
 # === 主界面逻辑 ===
