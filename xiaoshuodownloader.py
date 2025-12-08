@@ -1,4 +1,3 @@
-
 import streamlit as st
 import aiohttp
 import asyncio
@@ -9,8 +8,8 @@ import io
 import time
 import urllib.parse
 import mimetypes
-import datetime  # <--- 新增：用于计算Cookie过期时间
-import extra_streamlit_components as stx  # <--- 新增：用于管理Cookie
+import datetime
+import extra_streamlit_components as stx
 
 # ==========================================
 # 1. 基础引擎
@@ -42,7 +41,7 @@ class BaseEngine:
 
 
 # ==========================================
-# 2. 99小说网 (保持原样)
+# 2. 99小说网
 # ==========================================
 class JJJXSW_Engine(BaseEngine):
     def __init__(self):
@@ -112,71 +111,7 @@ class JJJXSW_Engine(BaseEngine):
 
 
 # ==========================================
-# 3. 00小说网 (保留代码但暂不使用)
-# ==========================================
-class ZeroShu_Engine(BaseEngine):
-    def __init__(self):
-        super().__init__()
-        self.source_name = "00小说网"
-        self.base_url = "http://m.00shu.la" 
-        self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "http://m.00shu.la/",
-            "Origin": "http://m.00shu.la",
-            "Content-Type": "application/x-www-form-urlencoded"
-        }
-
-    async def run(self, session, keyword):
-        # ... (此处省略具体逻辑，保持你之前的代码结构不变，为了节省篇幅我没重复贴中间逻辑，类结构保留即可) ...
-        # 如果你之前这部分是完整的，保留即可，不用改动
-        return False, None, [] 
-
-
-# ==========================================
-# 4. 笔趣阁 (新增：专治找不到书)
-# ==========================================
-class BiQuGe_Engine(BaseEngine):
-    def __init__(self):
-        super().__init__()
-        self.source_name = "笔趣阁"
-        self.base_url = "https://www.bqgka.com"
-
-    async def run(self, session, keyword):
-        logs = []
-        try:
-            self.log(logs, f"🚀 搜索: {keyword}")
-            async with session.get(f"{self.base_url}/s?q={urllib.parse.quote(keyword)}", headers=self.headers) as resp:
-                soup = BeautifulSoup(await resp.text(errors='ignore'), 'html.parser')
-
-            target_data = {}
-            found = False
-            for item in soup.select("h4.bookname a"):
-                title = item.get_text().strip()
-                if self.validate_title(keyword, title):
-                    target_data = {"title": title, "href": item['href'], "author": "未知"}
-                    found = True
-                    break
-            
-            if not found:
-                self.log(logs, "❌ 未找到")
-                return False, None, logs
-
-            self.log(logs, f"✅ 锁定: 《{target_data['title']}》")
-            full_url = self.base_url + target_data['href']
-            
-            return True, {
-                "type": "link", 
-                "title": target_data['title'],
-                "author": target_data['author'],
-                "url": full_url
-            }, logs
-        except Exception as e:
-            self.log(logs, f"❌ 异常: {e}")
-            return False, None, logs
-
-
-# ==========================================
-# 5. Z-Library 引擎
+# 3. Z-Library 引擎
 # ==========================================
 class ZLibrary_Engine(BaseEngine):
     def __init__(self, email, password):
@@ -251,11 +186,15 @@ class ZLibrary_Engine(BaseEngine):
 
 
 # ==========================================
-# 6. 搜索调度逻辑
+# 4. 搜索调度逻辑
 # ==========================================
 async def search_race_mode(keyword, zlib_creds):
-    # ✅ 修改：加入 BiQuGe_Engine，暂时注释掉 ZeroShu_Engine
-    engines = [JJJXSW_Engine(), BiQuGe_Engine()] 
+    # ✅ 修改：移除了 BiQuGe，只保留 99小说网
+    engines = [JJJXSW_Engine()] 
+    
+    # 00小说网依然保留注释状态，想用可以随时加回来
+    # engines.append(ZeroShu_Engine()) 
+
     if zlib_creds['email']: engines.append(ZLibrary_Engine(zlib_creds['email'], zlib_creds['password']))
 
     start = time.time()
@@ -282,12 +221,12 @@ async def search_race_mode(keyword, zlib_creds):
 
 
 # ==========================================
-# 7. UI 部分
+# 5. UI 部分
 # ==========================================
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
 
-# 初始化 Cookie 管理器 (放在 set_page_config 之后)
+# 初始化 Cookie 管理器
 cookie_manager = stx.CookieManager()
 
 st.markdown(
@@ -307,7 +246,7 @@ st.markdown(
 
 
 st.title("")
-st.caption("并发检索：99小说 | 笔趣阁 | Z-Library")
+st.caption("并发检索：99小说 | Z-Library")
 
 # === 侧边栏：Cookie 账号管理 ===
 with st.sidebar:
@@ -322,19 +261,20 @@ with st.sidebar:
     input_email = st.text_input("Email", value=cookie_email, key="z_email_input")
     input_pass = st.text_input("Password", value=cookie_pass, type="password", key="z_pass_input")
 
-    # 3. 保存按钮 (30天有效期)
+    # 3. 保存按钮 (修复了 DuplicateElementKey 报错)
     if st.button("💾 记住我的账号"):
         expires = datetime.datetime.now() + datetime.timedelta(days=30)
-        cookie_manager.set("zlib_email", input_email, expires_at=expires)
-        cookie_manager.set("zlib_pass", input_pass, expires_at=expires)
+        # 注意：这里增加了 key 参数，防止冲突
+        cookie_manager.set("zlib_email", input_email, expires_at=expires, key="set_email_cookie")
+        cookie_manager.set("zlib_pass", input_pass, expires_at=expires, key="set_pass_cookie")
         st.success("已保存到设备！")
         time.sleep(1)
         st.rerun()
 
     # 4. 清除按钮
     if st.button("🗑️ 忘记账号"):
-        cookie_manager.delete("zlib_email")
-        cookie_manager.delete("zlib_pass")
+        cookie_manager.delete("zlib_email", key="del_email_cookie")
+        cookie_manager.delete("zlib_pass", key="del_pass_cookie")
         st.rerun()
 
 # === 主界面逻辑 ===
@@ -349,7 +289,7 @@ if st.button("🚀 极速检索", type="primary"):
         if res["success"]:
             d = res['data']
 
-            # 情况 A: 链接 (Z-Lib 或 笔趣阁)
+            # 情况 A: 链接 (Z-Lib)
             if d.get("type") == "link":
                 st.markdown(
                     f"""
@@ -393,4 +333,3 @@ if st.button("🚀 极速检索", type="primary"):
 
         with st.expander("查看执行日志"):
             for m in res["logs"]: st.text(m)
-
