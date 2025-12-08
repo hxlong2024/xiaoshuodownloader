@@ -204,7 +204,7 @@ async def search_race_mode(keyword, zlib_creds):
     return {"success": False, "logs": all_logs, "time": time.time() - start}
 
 # ==========================================
-# 5. UI 部分 (V15.0 强制横排修复版)
+# 5. UI 部分 (V16.0 布局稳定修复版)
 # ==========================================
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
@@ -221,16 +221,15 @@ st.markdown(
     .link-box{padding:15px;background:#ebf8ff;border:1px solid #4299e1;color:#2b6cb0;border-radius:8px;text-align:center;}
     .link-box a {color: #2b6cb0; font-weight: bold; font-size: 1.2em; text-decoration: none;}
 
-    /* 3. 核弹级修复：强制手机端横排 (不许换行) */
+    /* 3. 强制不换行 (最稳妥的方式) */
     [data-testid="stHorizontalBlock"] {
         flex-wrap: nowrap !important; /* 禁止换行 */
-        gap: 0.5rem !important;       /* 按钮间距 */
+        align-items: flex-end !important; /* 底部对齐 */
     }
     
+    /* 允许列宽自动收缩，防止挤出屏幕 */
     [data-testid="column"] {
-        flex: 1 !important;           /* 强制弹性布局 */
-        width: auto !important;       /* 覆盖手机端的 width: 100% */
-        min-width: 0px !important;    /* 允许按钮缩小，防止挤下去 */
+        min-width: 0 !important;
     }
 
     /* 4. 调整清除按钮颜色 (红白配色) */
@@ -263,7 +262,6 @@ with st.sidebar:
 
 # === 回调函数 (解决清除报错) ===
 def clear_input():
-    # 在重绘前清空状态，安全无报错
     st.session_state["search_keyword"] = ""
 
 # === 主界面逻辑 ===
@@ -274,13 +272,13 @@ if "search_keyword" not in st.session_state:
 with st.form("search_form"):
     keyword = st.text_input("书名", placeholder="请手动粘贴书名...", key="search_keyword")
     
-    # 强制布局：搜索占 75%，清除占 25%
-    c1, c2 = st.columns([3, 1])
+    # 比例调整为 [5, 1]，给右边留最小的空间，确保不被挤出去
+    c1, c2 = st.columns([5, 1])
     
     with c1:
         is_submitted = st.form_submit_button("🚀 极速检索", type="primary")
     with c2:
-        # 这里的 help 提示可能会导致手机上按钮略微错位，可以删掉 help
+        # 只放一个简单的图标，节省空间
         st.form_submit_button("🧹", type="secondary", on_click=clear_input)
 
 # === 逻辑处理 ===
