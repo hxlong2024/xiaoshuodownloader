@@ -39,7 +39,7 @@ class BaseEngine:
         raise NotImplementedError
 
 # ==========================================
-# 2. 99小说网 (保持不变)
+# 2. 99小说网
 # ==========================================
 class JJJXSW_Engine(BaseEngine):
     def __init__(self):
@@ -206,7 +206,7 @@ async def search_race_mode(keyword, zlib_creds):
     return {"success": False, "logs": all_logs, "time": time.time() - start}
 
 # ==========================================
-# 5. UI 部分 (全新重构版)
+# 5. UI 部分 (V11.0 完美表单版)
 # ==========================================
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
@@ -229,23 +229,22 @@ st.markdown(
 st.title("")
 st.caption("并发检索：99小说 | Z-Library")
 
-# === 侧边栏：全新账号逻辑 ===
+# === 侧边栏：静默读取版 (不干扰前台，解决冲突) ===
 with st.sidebar:
     st.header("🔑 Z-Library 账号")
 
-    # 1. 静默读取 Cookie
-    # get_all() 即使还没加载完返回 None 也没关系，我们不强求
+    # 1. 静默读取 Cookie (不进行任何 Session State 赋值)
     cookies = cookie_manager.get_all()
     saved_email = cookies.get("zlib_email") if cookies else None
     saved_pass = cookies.get("zlib_pass") if cookies else None
 
-    # 2. 状态显示区 (代替输入框作为主要展示)
+    # 2. 状态显示区
     if saved_email:
         # 🟢 状态：已登录
         st.success(f"✅ 已保存账号: \n{saved_email}")
         st.caption("搜索时将自动使用此账号。")
         
-        # 只有点击展开才显示修改框，避免视觉干扰
+        # 修改区
         with st.expander("修改/更新账号"):
              with st.form("update_form"):
                 new_email = st.text_input("新 Email")
@@ -254,7 +253,7 @@ with st.sidebar:
                     expires = datetime.datetime.now() + datetime.timedelta(days=30)
                     cookie_manager.set("zlib_email", new_email, expires_at=expires, key="upd_email")
                     cookie_manager.set("zlib_pass", new_pass, expires_at=expires, key="upd_pass")
-                    st.rerun() # 这里Rerun没关系，因为是用户点击保存
+                    st.rerun()
         
         if st.button("🚪 退出登录"):
             cookie_manager.delete("zlib_email", key="del_e")
@@ -264,15 +263,13 @@ with st.sidebar:
     else:
         # 🔴 状态：未登录
         st.warning("⚠️ 未检测到保存的账号")
+        st.info("请先在此保存账号，才能搜索 Z-Library。")
         
-        # 使用 Form 表单来保存，避免刷新打断
         with st.form("login_form"):
             temp_email = st.text_input("Email")
             temp_pass = st.text_input("Password", type="password")
             
-            # 两个按钮：一个仅本次使用，一个保存
-            c1, c2 = st.columns(2)
-            is_save = c1.form_submit_button("💾 保存账号")
+            is_save = st.form_submit_button("💾 保存账号")
             
             if is_save:
                 if temp_email and temp_pass:
@@ -285,25 +282,25 @@ with st.sidebar:
                 else:
                     st.error("请填写完整")
 
-# === 主界面逻辑 ===
-keyword = st.text_input("书名", placeholder="例如：可怜的社畜")
+# === 主界面逻辑 (核心修复：使用 Form 表单) ===
+# 使用 Form 表单包裹输入框和按钮，彻底解决“吞第一次点击”的问题
 
-if st.button("🚀 极速检索", type="primary"):
+with st.form("search_form"):
+    # 输入框
+    keyword = st.text_input("书名", placeholder="例如：可怜的社畜")
+    
+    # 提交按钮 (Form 内必须用 form_submit_button)
+    # 这个按钮点击后，Streamlit 会把 keyword 和 点击动作 一起发给后台
+    is_submitted = st.form_submit_button("🚀 极速检索", type="primary")
+
+# 在 Form 外面处理逻辑
+if is_submitted:
     if not keyword:
         st.warning("请输入书名")
     else:
-        # 🧠 核心逻辑：智能选择账号
-        # 优先使用 Cookie 里的，如果没有，就用刚才输入框里的（如果有的话）
-        # 这里需要注意：如果用户没保存，输入框在 form 里，外面拿不到 form 里的值
-        # 所以：如果未登录，必须点保存才能用 Z-Lib，或者在 form 外面再提供临时输入？
-        # 简化逻辑：Z-Lib 必须登录才能用。
-        
+        # 优先使用 Cookie 里的账号
         final_email = saved_email
         final_pass = saved_pass
-        
-        # 如果没有 Cookie，尝试读取 session_state 里的临时值 (如果有)
-        # 但因为上面用了 form，最稳妥的方式是要求用户必须保存账号才能用 Zlib
-        # 或者 Zlib 引擎会检测，如果 email 为空，会自动跳过
         
         st.info("🔎 全网并发检索中...")
         res = asyncio.run(search_race_mode(keyword, {'email': final_email, 'password': final_pass}))
