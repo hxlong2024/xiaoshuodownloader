@@ -1,3 +1,5 @@
 streamlit
 aiohttp
+
 beautifulsoup4
+extra-streamlit-components
