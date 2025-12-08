@@ -204,7 +204,7 @@ async def search_race_mode(keyword, zlib_creds):
     return {"success": False, "logs": all_logs, "time": time.time() - start}
 
 # ==========================================
-# 5. UI 部分 (V12.0 纯净无 Cookie 版)
+# 5. UI 部分 (V13.0 清除按钮版)
 # ==========================================
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
@@ -217,6 +217,9 @@ st.markdown(
     .success-box{padding:15px;background:#e6fffa;border:1px solid #38b2ac;color:#234e52;border-radius:8px}
     .link-box{padding:15px;background:#ebf8ff;border:1px solid #4299e1;color:#2b6cb0;border-radius:8px;text-align:center;}
     .link-box a {color: #2b6cb0; font-weight: bold; font-size: 1.2em; text-decoration: none;}
+    /* 调整清除按钮的颜色 */
+    div[data-testid="stForm"] button[kind="secondary"] {border-color: #ffccc7; color: #cf1322;}
+    div[data-testid="stForm"] button[kind="secondary"]:hover {border-color: #ff7875; color: #a8071a; background-color: #fff1f0;}
     </style>
     """,
     unsafe_allow_html=True)
@@ -224,41 +227,56 @@ st.markdown(
 st.title("")
 st.caption("并发检索：99小说 | Z-Library")
 
-# === 侧边栏：URL 传参保存法 (最稳定，无 Cookie) ===
+# === 侧边栏：URL 传参保存法 ===
 with st.sidebar:
     st.header("🔑 Z-Library 账号")
     st.caption("👇 填好账号后点击保存，然后【收藏浏览器书签】即可。")
     
-    # 1. 从 URL 尝试获取参数
-    # 这种方式是 Streamlit 原生的，绝对没有任何副作用
     params = st.query_params
     default_email = params.get("email", "")
     default_pass = params.get("pass", "")
     
-    # 2. 显示输入框 (默认值来自 URL)
     s_email = st.text_input("Email", value=default_email, key="sb_email")
     s_pass = st.text_input("Password", value=default_pass, type="password", key="sb_pass")
     
-    # 3. 生成链接按钮
     if st.button("🔗 生成保存链接"):
-        # 将账号密码写入 URL
         st.query_params["email"] = s_email
         st.query_params["pass"] = s_pass
-        st.success("✅ 链接已生成！请按 Ctrl+D (或手机浏览器菜单) 收藏当前网页。")
-        time.sleep(1) # 给个视觉反馈
+        st.success("✅ 链接已生成！请收藏当前网页。")
+        time.sleep(1)
 
-# === 主界面逻辑 (使用 Form 确保 1 次点击生效) ===
+# === 主界面逻辑 (搜索框 + 按钮组) ===
+
+# 1. 确保 Session State 有 key
+if "search_keyword" not in st.session_state:
+    st.session_state["search_keyword"] = ""
 
 with st.form("search_form"):
-    keyword = st.text_input("书名", placeholder="例如：可怜的社畜")
-    # 提交按钮
-    is_submitted = st.form_submit_button("🚀 极速检索", type="primary")
+    # 搜索框绑定到 session_state
+    keyword = st.text_input("书名", placeholder="请手动粘贴书名...", key="search_keyword")
+    
+    # 使用列布局放置两个按钮
+    c1, c2 = st.columns([1, 1])
+    
+    with c1:
+        # 搜索按钮
+        is_submitted = st.form_submit_button("🚀 极速检索", type="primary")
+    with c2:
+        # 清除按钮 (也是一个 submit button，但我们要区分处理)
+        is_clear = st.form_submit_button("🧹 一键清除", type="secondary")
 
-if is_submitted:
+# === 逻辑处理 ===
+
+if is_clear:
+    # 🧹 清除逻辑：把 Session State 置空，然后强制刷新
+    st.session_state["search_keyword"] = ""
+    st.rerun()
+
+elif is_submitted:
+    # 🚀 搜索逻辑
     if not keyword:
         st.warning("请输入书名")
     else:
-        # 直接使用侧边栏当前的值
         st.info("🔎 全网并发检索中...")
         res = asyncio.run(search_race_mode(keyword, {'email': s_email, 'password': s_pass}))
 
