@@ -8,8 +8,6 @@ import io
 import time
 import urllib.parse
 import mimetypes
-import datetime
-import extra_streamlit_components as stx
 
 # ==========================================
 # 1. 基础引擎 (保持不变)
@@ -39,7 +37,7 @@ class BaseEngine:
         raise NotImplementedError
 
 # ==========================================
-# 2. 99小说网
+# 2. 99小说网 (保持不变)
 # ==========================================
 class JJJXSW_Engine(BaseEngine):
     def __init__(self):
@@ -206,13 +204,10 @@ async def search_race_mode(keyword, zlib_creds):
     return {"success": False, "logs": all_logs, "time": time.time() - start}
 
 # ==========================================
-# 5. UI 部分 (V11.0 完美表单版)
+# 5. UI 部分 (V12.0 纯净无 Cookie 版)
 # ==========================================
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
-
-# 初始化 Cookie 管理器
-cookie_manager = stx.CookieManager()
 
 st.markdown(
     """
@@ -229,81 +224,43 @@ st.markdown(
 st.title("")
 st.caption("并发检索：99小说 | Z-Library")
 
-# === 侧边栏：静默读取版 (不干扰前台，解决冲突) ===
+# === 侧边栏：URL 传参保存法 (最稳定，无 Cookie) ===
 with st.sidebar:
     st.header("🔑 Z-Library 账号")
+    st.caption("👇 填好账号后点击保存，然后【收藏浏览器书签】即可。")
+    
+    # 1. 从 URL 尝试获取参数
+    # 这种方式是 Streamlit 原生的，绝对没有任何副作用
+    params = st.query_params
+    default_email = params.get("email", "")
+    default_pass = params.get("pass", "")
+    
+    # 2. 显示输入框 (默认值来自 URL)
+    s_email = st.text_input("Email", value=default_email, key="sb_email")
+    s_pass = st.text_input("Password", value=default_pass, type="password", key="sb_pass")
+    
+    # 3. 生成链接按钮
+    if st.button("🔗 生成保存链接"):
+        # 将账号密码写入 URL
+        st.query_params["email"] = s_email
+        st.query_params["pass"] = s_pass
+        st.success("✅ 链接已生成！请按 Ctrl+D (或手机浏览器菜单) 收藏当前网页。")
+        time.sleep(1) # 给个视觉反馈
 
-    # 1. 静默读取 Cookie (不进行任何 Session State 赋值)
-    cookies = cookie_manager.get_all()
-    saved_email = cookies.get("zlib_email") if cookies else None
-    saved_pass = cookies.get("zlib_pass") if cookies else None
-
-    # 2. 状态显示区
-    if saved_email:
-        # 🟢 状态：已登录
-        st.success(f"✅ 已保存账号: \n{saved_email}")
-        st.caption("搜索时将自动使用此账号。")
-        
-        # 修改区
-        with st.expander("修改/更新账号"):
-             with st.form("update_form"):
-                new_email = st.text_input("新 Email")
-                new_pass = st.text_input("新 Password", type="password")
-                if st.form_submit_button("更新保存"):
-                    expires = datetime.datetime.now() + datetime.timedelta(days=30)
-                    cookie_manager.set("zlib_email", new_email, expires_at=expires, key="upd_email")
-                    cookie_manager.set("zlib_pass", new_pass, expires_at=expires, key="upd_pass")
-                    st.rerun()
-        
-        if st.button("🚪 退出登录"):
-            cookie_manager.delete("zlib_email", key="del_e")
-            cookie_manager.delete("zlib_pass", key="del_p")
-            st.rerun()
-            
-    else:
-        # 🔴 状态：未登录
-        st.warning("⚠️ 未检测到保存的账号")
-        st.info("请先在此保存账号，才能搜索 Z-Library。")
-        
-        with st.form("login_form"):
-            temp_email = st.text_input("Email")
-            temp_pass = st.text_input("Password", type="password")
-            
-            is_save = st.form_submit_button("💾 保存账号")
-            
-            if is_save:
-                if temp_email and temp_pass:
-                    expires = datetime.datetime.now() + datetime.timedelta(days=30)
-                    cookie_manager.set("zlib_email", temp_email, expires_at=expires, key="new_e")
-                    cookie_manager.set("zlib_pass", temp_pass, expires_at=expires, key="new_p")
-                    st.success("已保存！")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("请填写完整")
-
-# === 主界面逻辑 (核心修复：使用 Form 表单) ===
-# 使用 Form 表单包裹输入框和按钮，彻底解决“吞第一次点击”的问题
+# === 主界面逻辑 (使用 Form 确保 1 次点击生效) ===
 
 with st.form("search_form"):
-    # 输入框
     keyword = st.text_input("书名", placeholder="例如：可怜的社畜")
-    
-    # 提交按钮 (Form 内必须用 form_submit_button)
-    # 这个按钮点击后，Streamlit 会把 keyword 和 点击动作 一起发给后台
+    # 提交按钮
     is_submitted = st.form_submit_button("🚀 极速检索", type="primary")
 
-# 在 Form 外面处理逻辑
 if is_submitted:
     if not keyword:
         st.warning("请输入书名")
     else:
-        # 优先使用 Cookie 里的账号
-        final_email = saved_email
-        final_pass = saved_pass
-        
+        # 直接使用侧边栏当前的值
         st.info("🔎 全网并发检索中...")
-        res = asyncio.run(search_race_mode(keyword, {'email': final_email, 'password': final_pass}))
+        res = asyncio.run(search_race_mode(keyword, {'email': s_email, 'password': s_pass}))
 
         if res["success"]:
             d = res['data']
@@ -346,8 +303,8 @@ if is_submitted:
 
         else:
             st.error("😭 全网未找到资源")
-            if not final_email:
-                st.warning("提示：Z-Library 需要先在侧边栏【保存账号】才能搜索。")
+            if not s_email:
+                st.warning("提示：侧边栏未填 Z-Library 账号，仅搜索了免费源。")
 
         with st.expander("查看执行日志"):
             for m in res["logs"]: st.text(m)
