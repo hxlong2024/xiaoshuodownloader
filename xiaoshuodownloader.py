@@ -126,7 +126,6 @@ class ZeroShu_Engine(BaseEngine):
         }
     async def run(self, session, keyword):
         # 暂时省略具体逻辑，如果需要重新启用，请把之前修复版的代码填回来
-        # 或者直接留空返回，防止报错
         return False, None, []
 
 
@@ -241,7 +240,7 @@ async def search_race_mode(keyword, zlib_creds):
 
 
 # ==========================================
-# 6. UI 部分 (核心修复版)
+# 6. UI 部分 (完整修复版)
 # ==========================================
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
@@ -270,53 +269,58 @@ st.markdown(
 st.title("")
 st.caption("并发检索：99小说 | Z-Library")
 
-# === 侧边栏：Cookie 账号管理 (霸道填充逻辑) ===
+# === 侧边栏：Cookie 账号管理 (防止第一次无效 + 防止报错) ===
 with st.sidebar:
     st.header("🔑 Z-Library")
     
-    # 1. 读取 Cookie
+    # 1. 初始化标记 (防止冲突导致刷新)
+    if "cookie_initialized" not in st.session_state:
+        st.session_state["cookie_initialized"] = False
+
+    # 2. 读取 Cookie
     cookies = cookie_manager.get_all()
     
-    # 2. 【核心修复】霸道填充逻辑
-    # 如果 Cookie 存在，但 Session State 里没东西（或者为空），强制填进去
-    # 这步操作是为了对抗 Streamlit 的刷新机制
-    if cookies:
+    # 3. 核心修复：只在第一次加载且未初始化时执行填充
+    if not st.session_state["cookie_initialized"] and cookies:
         c_email = cookies.get("zlib_email")
         c_pass = cookies.get("zlib_pass")
         
-        if c_email and (st.session_state.get("z_email_input") == "" or "z_email_input" not in st.session_state):
-            st.session_state["z_email_input"] = c_email
-            
-        if c_pass and (st.session_state.get("z_pass_input") == "" or "z_pass_input" not in st.session_state):
-            st.session_state["z_pass_input"] = c_pass
+        # 强制填充
+        if c_email: st.session_state["z_email_input"] = c_email
+        if c_pass: st.session_state["z_pass_input"] = c_pass
+        
+        # 标记为已完成
+        st.session_state["cookie_initialized"] = True
+        
+        # 立即主动刷新，让界面状态稳定
+        st.rerun()
 
-    # 3. 显示输入框
-    # 注意：不要写 value=...，完全交给 key 和 session_state 管理
+    # 4. 显示输入框 (key与上面的session_state对应，实现自动填充)
     input_email = st.text_input("Email", key="z_email_input")
     input_pass = st.text_input("Password", type="password", key="z_pass_input")
 
-    # 4. 保存按钮
+    # 5. 保存按钮
     if st.button("💾 记住我的账号"):
         expires = datetime.datetime.now() + datetime.timedelta(days=30)
         
-        # 写入 Cookie (使用 unique key 防止报错)
+        # 使用 unique key 防止 StreamlitDuplicateElementKey 报错
         cookie_manager.set("zlib_email", input_email, expires_at=expires, key="set_email_cookie")
         cookie_manager.set("zlib_pass", input_pass, expires_at=expires, key="set_pass_cookie")
         
         st.success("✅ 已保存！")
-        # 强制等待 1.5 秒，让手机浏览器有时间写入
+        # 延长等待，确保手机端写入成功
         time.sleep(1.5) 
         st.rerun()
 
-    # 5. 清除按钮
+    # 6. 清除按钮
     if st.button("🗑️ 忘记账号"):
-        # 删除 Cookie (使用 unique key 防止报错)
         cookie_manager.delete("zlib_email", key="del_email_cookie")
         cookie_manager.delete("zlib_pass", key="del_pass_cookie")
         
-        # 同时必须清空当前的输入框状态，否则界面上删不掉
+        # 清除输入框和标记，允许重新操作
         st.session_state["z_email_input"] = ""
         st.session_state["z_pass_input"] = ""
+        st.session_state["cookie_initialized"] = False
         
         st.rerun()
 
