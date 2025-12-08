@@ -204,7 +204,7 @@ async def search_race_mode(keyword, zlib_creds):
     return {"success": False, "logs": all_logs, "time": time.time() - start}
 
 # ==========================================
-# 5. UI 部分 (V16.0 布局稳定修复版)
+# 5. UI 部分 (V17.0 回归两行稳定版)
 # ==========================================
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
@@ -212,27 +212,13 @@ st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout=
 st.markdown(
     """
     <style>
-    /* 1. 消除顶部空白 */
     .block-container {padding-top: 0rem !important; padding-bottom: 1rem !important;}
-    
-    /* 2. 按钮基础样式 */
     .stButton>button{width:100%;border-radius:8px;font-weight:bold}
     .success-box{padding:15px;background:#e6fffa;border:1px solid #38b2ac;color:#234e52;border-radius:8px}
     .link-box{padding:15px;background:#ebf8ff;border:1px solid #4299e1;color:#2b6cb0;border-radius:8px;text-align:center;}
     .link-box a {color: #2b6cb0; font-weight: bold; font-size: 1.2em; text-decoration: none;}
-
-    /* 3. 强制不换行 (最稳妥的方式) */
-    [data-testid="stHorizontalBlock"] {
-        flex-wrap: nowrap !important; /* 禁止换行 */
-        align-items: flex-end !important; /* 底部对齐 */
-    }
     
-    /* 允许列宽自动收缩，防止挤出屏幕 */
-    [data-testid="column"] {
-        min-width: 0 !important;
-    }
-
-    /* 4. 调整清除按钮颜色 (红白配色) */
+    /* 调整清除按钮颜色 */
     div[data-testid="stForm"] button[kind="secondary"] {border-color: #ffccc7; color: #cf1322;}
     div[data-testid="stForm"] button[kind="secondary"]:hover {border-color: #ff7875; color: #a8071a; background-color: #fff1f0;}
     </style>
@@ -260,7 +246,7 @@ with st.sidebar:
         st.success("✅ 链接已生成！请收藏当前网页。")
         time.sleep(1)
 
-# === 回调函数 (解决清除报错) ===
+# === 回调函数 (清除状态) ===
 def clear_input():
     st.session_state["search_keyword"] = ""
 
@@ -272,14 +258,16 @@ if "search_keyword" not in st.session_state:
 with st.form("search_form"):
     keyword = st.text_input("书名", placeholder="请手动粘贴书名...", key="search_keyword")
     
-    # 比例调整为 [5, 1]，给右边留最小的空间，确保不被挤出去
-    c1, c2 = st.columns([5, 1])
+    # 比例设为 1:1
+    # 在电脑上，这是左右并排
+    # 在手机上，Streamlit 会自动把它们拆成上下两行 (这就是你要的效果)
+    c1, c2 = st.columns([1, 1])
     
     with c1:
         is_submitted = st.form_submit_button("🚀 极速检索", type="primary")
     with c2:
-        # 只放一个简单的图标，节省空间
-        st.form_submit_button("🧹", type="secondary", on_click=clear_input)
+        # 加上 on_click 回调，确保清除功能正常且不报错
+        st.form_submit_button("🧹 一键清除", type="secondary", on_click=clear_input)
 
 # === 逻辑处理 ===
 
