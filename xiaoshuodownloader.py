@@ -204,7 +204,7 @@ async def search_race_mode(keyword, zlib_creds):
     return {"success": False, "logs": all_logs, "time": time.time() - start}
 
 # ==========================================
-# 5. UI 部分 (V13.0 清除按钮版)
+# 5. UI 部分 (V14.0 修复报错+手机布局版)
 # ==========================================
 
 st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
@@ -217,6 +217,14 @@ st.markdown(
     .success-box{padding:15px;background:#e6fffa;border:1px solid #38b2ac;color:#234e52;border-radius:8px}
     .link-box{padding:15px;background:#ebf8ff;border:1px solid #4299e1;color:#2b6cb0;border-radius:8px;text-align:center;}
     .link-box a {color: #2b6cb0; font-weight: bold; font-size: 1.2em; text-decoration: none;}
+    
+    /* === 手机端强制一行显示 CSS === */
+    [data-testid="column"] {
+        width: calc(33.3333% - 1rem) !important;
+        flex: 1 1 calc(33.3333% - 1rem) !important;
+        min-width: 50px !important;
+    }
+    
     /* 调整清除按钮的颜色 */
     div[data-testid="stForm"] button[kind="secondary"] {border-color: #ffccc7; color: #cf1322;}
     div[data-testid="stForm"] button[kind="secondary"]:hover {border-color: #ff7875; color: #a8071a; background-color: #fff1f0;}
@@ -245,7 +253,12 @@ with st.sidebar:
         st.success("✅ 链接已生成！请收藏当前网页。")
         time.sleep(1)
 
-# === 主界面逻辑 (搜索框 + 按钮组) ===
+# === 回调函数 (解决报错的关键) ===
+def clear_input():
+    # 这个函数会在页面重绘之前运行，安全地清除状态
+    st.session_state["search_keyword"] = ""
+
+# === 主界面逻辑 ===
 
 # 1. 确保 Session State 有 key
 if "search_keyword" not in st.session_state:
@@ -256,23 +269,20 @@ with st.form("search_form"):
     keyword = st.text_input("书名", placeholder="请手动粘贴书名...", key="search_keyword")
     
     # 使用列布局放置两个按钮
-    c1, c2 = st.columns([1, 1])
+    # [3, 1] 的比例，让搜索按钮宽一些，清除按钮窄一些
+    c1, c2 = st.columns([3, 1])
     
     with c1:
         # 搜索按钮
         is_submitted = st.form_submit_button("🚀 极速检索", type="primary")
     with c2:
-        # 清除按钮 (也是一个 submit button，但我们要区分处理)
-        is_clear = st.form_submit_button("🧹 一键清除", type="secondary")
+        # 清除按钮 (绑定 on_click 回调)
+        # 注意：这里我们不需要 is_clear 变量了，因为点击动作由回调处理
+        st.form_submit_button("🧹", type="secondary", on_click=clear_input, help="一键清除输入框")
 
 # === 逻辑处理 ===
 
-if is_clear:
-    # 🧹 清除逻辑：把 Session State 置空，然后强制刷新
-    st.session_state["search_keyword"] = ""
-    st.rerun()
-
-elif is_submitted:
+if is_submitted:
     # 🚀 搜索逻辑
     if not keyword:
         st.warning("请输入书名")
