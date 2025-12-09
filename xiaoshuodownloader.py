@@ -10,36 +10,13 @@ import urllib.parse
 import mimetypes
 
 # ==========================================
-# 0. 页面配置与 CSS (放在最前面，加速渲染)
-# ==========================================
-st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
-
-st.markdown(
-    """
-    <style>
-    /* 1. 消除顶部空白 */
-    .block-container {padding-top: 0rem !important; padding-bottom: 1rem !important;}
-    
-    /* 2. 按钮基础样式 */
-    .stButton>button{width:100%;border-radius:8px;font-weight:bold}
-    .success-box{padding:15px;background:#e6fffa;border:1px solid #38b2ac;color:#234e52;border-radius:8px}
-    .link-box{padding:15px;background:#ebf8ff;border:1px solid #4299e1;color:#2b6cb0;border-radius:8px;text-align:center;}
-    .link-box a {color: #2b6cb0; font-weight: bold; font-size: 1.2em; text-decoration: none;}
-    
-    /* 调整清除按钮颜色 */
-    div[data-testid="stForm"] button[kind="secondary"] {border-color: #ffccc7; color: #cf1322;}
-    div[data-testid="stForm"] button[kind="secondary"]:hover {border-color: #ff7875; color: #a8071a; background-color: #fff1f0;}
-    </style>
-    """,
-    unsafe_allow_html=True)
-
-# ==========================================
-# 1. 基础引擎
+# 1. 基础引擎 (保持不变)
 # ==========================================
 
 class BaseEngine:
     def __init__(self):
         self.source_name = "未知源"
+        # 模拟最新 Chrome
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -60,7 +37,7 @@ class BaseEngine:
         raise NotImplementedError
 
 # ==========================================
-# 2. 99小说网
+# 2. 99小说网 (保持不变)
 # ==========================================
 class JJJXSW_Engine(BaseEngine):
     def __init__(self):
@@ -198,7 +175,7 @@ class ZLibrary_Engine(BaseEngine):
             return False, None, logs
 
 # ==========================================
-# 4. 搜索调度逻辑 (核心)
+# 4. 搜索调度逻辑
 # ==========================================
 async def search_race_mode(keyword, zlib_creds):
     engines = [JJJXSW_Engine()] 
@@ -227,26 +204,31 @@ async def search_race_mode(keyword, zlib_creds):
     return {"success": False, "logs": all_logs, "time": time.time() - start}
 
 # ==========================================
-# 5. 缓存装饰器 (🚀 提速黑科技)
+# 5. UI 部分 (V17.0 回归两行稳定版)
 # ==========================================
-@st.cache_data(ttl=3600, show_spinner=False) # 缓存1小时
-def cached_search(keyword, email, password):
-    """
-    包装函数：将异步搜索变成可缓存的同步调用
-    只要 keyword/email/password 不变，第二次调用直接返回结果，无需联网
-    """
-    # 必须创建一个新的事件循环来运行异步代码
-    # 因为 st.cache_data 是同步的
-    return asyncio.run(search_race_mode(keyword, {'email': email, 'password': password}))
 
-# ==========================================
-# 6. UI 部分
-# ==========================================
+st.set_page_config(page_title="全能赛马下载器", page_icon="🦄", layout="centered")
+
+st.markdown(
+    """
+    <style>
+    .block-container {padding-top: 0rem !important; padding-bottom: 1rem !important;}
+    .stButton>button{width:100%;border-radius:8px;font-weight:bold}
+    .success-box{padding:15px;background:#e6fffa;border:1px solid #38b2ac;color:#234e52;border-radius:8px}
+    .link-box{padding:15px;background:#ebf8ff;border:1px solid #4299e1;color:#2b6cb0;border-radius:8px;text-align:center;}
+    .link-box a {color: #2b6cb0; font-weight: bold; font-size: 1.2em; text-decoration: none;}
+    
+    /* 调整清除按钮颜色 */
+    div[data-testid="stForm"] button[kind="secondary"] {border-color: #ffccc7; color: #cf1322;}
+    div[data-testid="stForm"] button[kind="secondary"]:hover {border-color: #ff7875; color: #a8071a; background-color: #fff1f0;}
+    </style>
+    """,
+    unsafe_allow_html=True)
 
 st.title("")
 st.caption("并发检索：99小说 | Z-Library")
 
-# === 侧边栏 ===
+# === 侧边栏：URL 传参保存法 ===
 with st.sidebar:
     st.header("🔑 Z-Library 账号")
     st.caption("👇 填好账号后点击保存，然后【收藏浏览器书签】即可。")
@@ -264,7 +246,7 @@ with st.sidebar:
         st.success("✅ 链接已生成！请收藏当前网页。")
         time.sleep(1)
 
-# === 回调函数 ===
+# === 回调函数 (清除状态) ===
 def clear_input():
     st.session_state["search_keyword"] = ""
 
@@ -276,11 +258,15 @@ if "search_keyword" not in st.session_state:
 with st.form("search_form"):
     keyword = st.text_input("书名", placeholder="请手动粘贴书名...", key="search_keyword")
     
+    # 比例设为 1:1
+    # 在电脑上，这是左右并排
+    # 在手机上，Streamlit 会自动把它们拆成上下两行 (这就是你要的效果)
     c1, c2 = st.columns([1, 1])
     
     with c1:
         is_submitted = st.form_submit_button("🚀 极速检索", type="primary")
     with c2:
+        # 加上 on_click 回调，确保清除功能正常且不报错
         st.form_submit_button("🧹 一键清除", type="secondary", on_click=clear_input)
 
 # === 逻辑处理 ===
@@ -289,10 +275,8 @@ if is_submitted:
     if not keyword:
         st.warning("请输入书名")
     else:
-        # 使用 st.spinner 包装，提升视觉流畅度
-        with st.spinner("🔎 全网并发检索中..."):
-            # 【关键修改】调用缓存版的搜索函数，而不是直接调用 asyncio
-            res = cached_search(keyword, s_email, s_pass)
+        st.info("🔎 全网并发检索中...")
+        res = asyncio.run(search_race_mode(keyword, {'email': s_email, 'password': s_pass}))
 
         if res["success"]:
             d = res['data']
