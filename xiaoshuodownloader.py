@@ -37,7 +37,7 @@ class BaseEngine:
         raise NotImplementedError
 
 # ==========================================
-# 2. 99小说网 (保持不变)
+# 2. 99小说网 (精准匹配优化版)
 # ==========================================
 class JJJXSW_Engine(BaseEngine):
     def __init__(self):
@@ -55,19 +55,60 @@ class JJJXSW_Engine(BaseEngine):
                                     headers=self.headers) as resp:
                 soup = BeautifulSoup(await resp.text(encoding='utf-8', errors='ignore'), 'html.parser')
 
-            target_item = None; target_title = ""; target_href = ""; target_author = "佚名"
+            # === 优化开始：先收集所有结果，再筛选 ===
+            candidates = []
             for item in soup.select(".booklist_a .list_a .main"):
                 link = item.find('a')
                 if not link: continue
+                
                 raw_title = link.get_text().strip()
+                href = link['href']
+                
+                # 提取作者
+                author = "佚名"
+                for span in item.find_all('span'):
+                    if "作者" in span.get_text(): 
+                        author = span.get_text().split(":")[-1].strip()
+                        break
+                
+                # 只要包含关键词，先存进候选列表
                 if self.validate_title(keyword, raw_title):
-                    target_item = item; target_title = raw_title; target_href = link['href']
-                    for span in item.find_all('span'):
-                        if "作者" in span.get_text(): target_author = span.get_text().split(":")[-1].strip(); break
-                    break
+                    candidates.append({
+                        "item": item,
+                        "title": raw_title,
+                        "href": href,
+                        "author": author
+                    })
 
-            if not target_item: return False, None, logs
-            self.log(logs, f"✅ 匹配: 《{target_title}》")
+            if not candidates:
+                return False, None, logs
+
+            # === 核心逻辑：精准匹配优先 ===
+            target = None
+            
+            # 1. 尝试寻找“书名完全一致”的结果
+            # 清理函数：去掉标点符号和空格，统一小写，防止“书名 ”和“书名”不匹配
+            def clean(s): return re.sub(r'[^\w\u4e00-\u9fa5]', '', s).lower()
+            clean_keyword = clean(keyword)
+
+            for cand in candidates:
+                if clean(cand['title']) == clean_keyword:
+                    target = cand
+                    self.log(logs, f"🎯 触发精准匹配: 《{cand['title']}》")
+                    break
+            
+            # 2. 如果没找到完全一致的，就默认取第一个（保底）
+            if not target:
+                target = candidates[0]
+                self.log(logs, f"⚠️ 无精确匹配，默认取首个: 《{target['title']}》")
+
+            # 解包选中的结果
+            target_title = target['title']
+            target_href = target['href']
+            target_author = target['author']
+            
+            self.log(logs, f"✅ 最终锁定: 《{target_title}》 作者: {target_author}")
+            # === 优化结束 ===
 
             async with session.get(self.base_url + target_href, headers=self.headers) as resp:
                 intro_soup = BeautifulSoup(await resp.text(encoding='utf-8', errors='ignore'), 'html.parser')
@@ -99,6 +140,7 @@ class JJJXSW_Engine(BaseEngine):
         except Exception as e:
             self.log(logs, f"❌ 异常: {e}");
             return False, None, logs
+
 
 # ==========================================
 # 3. Z-Library 引擎
